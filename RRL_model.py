@@ -159,13 +159,102 @@ class RRL(object):
         :param Prev: Given previous information as starting point
         :return: A, B, F, grad_prev[gradient of this step]
         '''
-        pass
+        feed_dict = {}
+        feed_dict[self.Ap] = 0
+        feed_dict[self.Bp] = 0
+        feed_dict[self.feature] = feature
+        feed_dict[self.rise_percent] = rise_percent
+        stock_num = state_vec.shape[0]
+        if Prev is None:
+            init_F = np.expand_dims(softmax([random.random() for _ in range(stock_num)]), axis=0)
+        else:
+            inif_F = Prev["Fp"]
+            feed_dict[self.Ap] = Prev["Ap"]
+            feed_dict[self.Bp] = Prev["Bp"]
+        feed_dcit[self.Fp] = init_F
+        fetches = [self.A, self.B, self.F, self.grad_F_net_prev]
+        A, B, F, grad_prev = session.run(fetches, feed_dict)
+        return A, B, F, grad_prev
 
-    def run_step():
-        ''' Stepwise Trading'''
+    def run_step(self, session, state_vec, rise_percent, Ap, Bp, Fp, weight, grad_prev, op):
+        ''' 
+        Stepwise Trading
+        :param session: tensorflow session
+        :param state_vec: state vector on stocks in trading days
+        :param rise_percent: rise_percent of all stocks in trading days
+        :param op: optimization option
+        :return: portfolios, sharpe ratio, variable of policy net
+        '''
+        feed_dict = {}
+        feed_dict[self.Ap] = float(Ap)
+        feed_dict[self.Bp] = float(Bp)
+        feed_dict[self.Fp] = Fp
+        feed_dict[self.state_vec] = state_vec
+        feed_dict[self.rise_percent] = rise_percent
+        for i in range(len(grad_prev)):
+            feed_dict[self.grad_prev[i]] = grad_prev[i]
 
-    def run_epoch():
-        ''' Epoch-wise Runing '''
+        # For saving the gradient, but do no optimization
+        fetches = [self.A, self.B, self.sharpe, self.F, self.grad_F_net_prev]
+        A, B, sharpe, portfolio, grad_prev = session.run(fetches, feed_dict)
+        # Do optimization
+        fetches = [self.A, self.B, self.sharpe, self.F, op]
+        A, B, sharpe, portfolio, _ = session.run(fetches, feed_dict)
+        return A, B, sharpe, portfolio, grad_prev
+    def run_epoch(self. session, state_vec, rise_percent, op, rd=True, Prev=None):
+        '''
+        Epoch-wise Runing
+        :param session: tensorflow session
+        :param state_vec: state vec of all stocks in trading days
+        :param rise_percent: rise_percent of all stocks in trading days
+        :param op: optimization option
+        :return: Sharpe Ratio, Portfolios
+        '''
+        times, stock_num, fea_dim = features.shape
+        portfolios = []
+        sharpes = []
+        total_reward = 0
+        for time in range(times):
+            state_vec_t = state_vec[time]
+            rise_percent_t = np.expand_dims(rise_percent[time, :], axis=1)
+            if time == 0:
+                if Prev is None:
+                    A, B, portfolio, grad_prev = self.run_init(session, state_vec_t, rise_percent_t)
+                else:
+                    A, B, portfolio, grad_prev = self.run_init(session, state_vec_t, rise_percent_t, Prev)
+                sharpe = 0
+            else:
+                A, B, sharpe, portfolio, grad_prev = \
+                        self.run_step(session, state_vec_t, rise_percent_t, A, B, portfolio, grad_prev, op)
+            portfolios.append(portfolio)
+            sharpes.append(sharpe)
+            total_reward += np.dot(portfolio, rise_percent_t)
+        return sharpes, portfolios, total_reward
 
-    def run_test_epoch():
-        ''' For test '''
+    def run_test_epoch(self, session, state_vec, rise_percent):
+        '''
+        For test
+        '''
+        times, stock_num, fea_dim = state_vec.shape
+        portfolios = []
+        sharpes = []
+        total_reward = 0
+        for time in range(times):
+            state_vec_t = state_vec[time]
+            rise_percent_t = np.expand_dims(rise_percent[time, :], axis=1)
+            feed_dict = {}
+            feed_dict[self.state_vec] = state_vec_t
+            feed_dict[self.rise_percent] = rise_percent_t
+            if time == 0:
+                A, B, portfolio, _ = self.run_init(session, state_vec_t, rise_percent_t)
+            else:
+                feed_dict[self.Ap] = float(A)
+                feed_dict[self.Bp] = float(B)
+                feed_dict[self.Fp] = portfolio
+                fetches = [self.A, self.B, self.sharpe, self.F]
+                A, B, sharpe, portfolio = session.run(fetches, feed_dict)
+
+            sharpes.append(sharpe)
+            portfolios.append(portfolio[0])
+            total_reward += np.dot(portfolio, rise_percent_t)
+        return sharpes, portfolios, total_reward
