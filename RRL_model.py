@@ -125,8 +125,6 @@ class RRL(object):
         self.sharpe = self.A / (K*(tf.sqrt(self.B-tf.square(self.A)))) # differential Sharpe Ratio
         # Save the gradient of F/net at current time, and it'll be feed as grad_prev next time
         self.grad_F_net_prev = self._get_split_gradient(F, var_net)
-        #Compute Gradient
-        if config.is_training:
             grad_S_Rt = tf.gradients(self.sharpe, Rt) # S is the Reward, specifically the Sharpe Ratio here
             grad_Rt_F = tf.gradients(Rt, F, grad_ys = grad_S_Rt)
             grad_Rt_Fp = tf.gradients(Rt, Fp, grad_ys = grad_S_Rt)
@@ -201,6 +199,7 @@ class RRL(object):
         fetches = [self.A, self.B, self.sharpe, self.F, op]
         A, B, sharpe, portfolio, _ = session.run(fetches, feed_dict)
         return A, B, sharpe, portfolio, grad_prev
+    
     def run_epoch(self. session, state_vec, rise_percent, op, rd=True, Prev=None):
         '''
         Epoch-wise Runing
